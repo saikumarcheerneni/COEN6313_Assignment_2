@@ -38,7 +38,7 @@ ORDER_BASE = "http://order_service:5002"
 
 # --------------- UTILITY: FORWARD REQUEST -------------------
 
-sync def forward_request(request: Request, url: str):
+async def forward_request(request: Request, url: str):
     try:
         body = await request.json()
     except:
