@@ -1,67 +1,58 @@
-from flask import Flask, request, jsonify
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from pymongo import MongoClient
-import pika, json, os
+import os
 
 MONGO_URI = os.environ.get("USER_MONGO_URI", "mongodb://mongo_user:27017/")
-RABBITMQ_HOST = os.environ.get("RABBITMQ_HOST", "rabbitmq")
-
-app = Flask(__name__)
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client.userdb
+client = MongoClient(MONGO_URI)
+db = client.userdb
 users = db.users
 
-def get_rabbit_channel():
-    params = pika.ConnectionParameters(host=RABBITMQ_HOST)
-    connection = pika.BlockingConnection(params)
-    ch = connection.channel()
-    ch.queue_declare(queue='sync_queue', durable=True)
-    return connection, ch
+app = FastAPI(
+    title="User Service V1",
+    description="Basic user CRUD (no event publishing)",
+    version="1.0"
+)
 
-@app.route("/health", methods=["GET"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class User(BaseModel):
+    user_id: str
+    name: str
+    email: str
+    address: str
+
+class UserUpdate(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    address: str | None = None
+
+@app.get("/health")
 def health():
-    return jsonify({"status": "ok", "component": "user_v1"}), 200
+    return {"status": "ok", "component": "user_v1"}
 
-@app.route("/user", methods=["POST"])
-def create_user():
-    data = request.get_json(force=True)
-    if not data or "user_id" not in data:
-        return jsonify({"error": "user_id required"}), 400
-    users.update_one({"user_id": data["user_id"]}, {"$set": data}, upsert=True)
-    return jsonify({"message": "User created/updated", "user": data}), 201
+@app.post("/user")
+def create_user(user: User):
+    users.update_one({"user_id": user.user_id}, {"$set": user.dict()}, upsert=True)
+    return {"message": "User created/updated", "user": user}
 
-@app.route("/user/<user_id>", methods=["PUT"])
-def update_user(user_id):
-    data = request.get_json(force=True)
-    if not data:
-        return jsonify({"error": "no update payload"}), 400
-    users.update_one({"user_id": user_id}, {"$set": data}, upsert=True)
+@app.put("/user/{user_id}")
+def update_user(user_id: str, update: UserUpdate):
+    update_data = {k: v for k, v in update.dict().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update data")
+    users.update_one({"user_id": user_id}, {"$set": update_data}, upsert=True)
+    return {"message": "User updated", "updated_fields": update_data}
 
-    payload = {"user_id": user_id, "update": {}}
-    for k in ["email", "address"]:
-        if k in data:
-            payload["update"][k] = data[k]
-
-    if payload["update"]:
-        try:
-            conn, ch = get_rabbit_channel()
-            ch.basic_publish(
-                exchange="",
-                routing_key="sync_queue",
-                body=json.dumps(payload).encode("utf-8"),
-                properties=pika.BasicProperties(delivery_mode=2)
-            )
-            conn.close()
-        except Exception as e:
-            return jsonify({"message": "User updated but event publish failed", "error": str(e)}), 202
-
-    return jsonify({"message": "User updated", "event_published": bool(payload["update"])}), 200
-@app.route("/user/<user_id>", methods=["GET"])
-def get_user(user_id):
+@app.get("/user/{user_id}")
+def get_user(user_id: str):
     user = users.find_one({"user_id": user_id}, {"_id": 0})
-    if user:
-        return jsonify(user), 200
-    else:
-        return jsonify({"error": "User not found"}), 404
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user

@@ -3,7 +3,7 @@ name: Deploy to Azure VM
 on:
   push:
     branches:
-      - main  # or whichever branch you use
+      - main
 
 jobs:
   deploy:
@@ -16,7 +16,7 @@ jobs:
       - name: Stop old containers
         run: |
           cd ~/COEN6313_Assignment_2
-          sudo docker compose down || true
+          docker compose down || true
 
       - name: Pull latest code
         run: |
@@ -26,4 +26,4 @@ jobs:
       - name: Rebuild and start containers
         run: |
           cd ~/COEN6313_Assignment_2
-          sudo docker compose up -d --build
+          docker compose up -d --build

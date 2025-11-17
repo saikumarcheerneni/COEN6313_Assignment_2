@@ -1,16 +1,33 @@
-from flask import Flask, request, jsonify, Response
-import requests, json, random, os
+import json
+import os
+import random
+import requests
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
-app = Flask(__name__)
+app = FastAPI(
+    title="API Gateway",
+    description="Routes requests to User Service v1/v2 and Order Service",
+    version="1.0.0"
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 CONFIG_PATH = os.environ.get("GATEWAY_CONFIG", "config.json")
 
 def load_config():
     try:
-        with open(CONFIG_PATH) as f:
+        with open(CONFIG_PATH, "r") as f:
             return json.load(f)
-    except Exception:
-        return {"P": 0.5}  # default 50/50
+    except:
+        return {"P": 0.5}
 
 def choose_user_service():
     cfg = load_config()
@@ -19,39 +36,51 @@ def choose_user_service():
 
 ORDER_BASE = "http://order_service:5002"
 
-def _forward(base):
-    url = f"{base}{request.path}"
+# --------------- UTILITY: FORWARD REQUEST -------------------
+
+async def forward_request(request: Request, base_url: str):
+    url = f"{base_url}{request.url.path}"
+    method = request.method
+
+    body = None
+    if method in ["POST", "PUT", "PATCH"]:
+        body = await request.json()
+
     try:
-        r = requests.request(
-            method=request.method,
+        forwarded = requests.request(
+            method=method,
             url=url,
-            params=request.args,
-            json=(request.get_json(silent=True) if request.method in ["POST","PUT","PATCH"] else None),
+            params=request.query_params,
+            json=body,
             timeout=10
         )
-        headers = {"Content-Type": r.headers.get("Content-Type","application/json")}
-        return Response(r.content, status=r.status_code, headers=headers)
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": "service_unreachable", "detail": str(e)}), 502
+        return Response(
+            content=forwarded.content,
+            status_code=forwarded.status_code,
+            media_type=forwarded.headers.get("content-type", "application/json")
+        )
 
-@app.route("/health", methods=["GET"])
+    except Exception as e:
+        return {"error": "service_unreachable", "detail": str(e)}, 502
+
+# ---------------------- ROUTES ----------------------
+
+@app.get("/health")
 def health():
-    return jsonify({"status": "ok", "component": "api_gateway"}), 200
+    return {"status": "ok", "component": "gateway"}
 
-@app.route("/user", methods=["POST"])
-def gw_user_create():
-    return _forward(choose_user_service())
+@app.post("/user")
+async def create_user(request: Request):
+    return await forward_request(request, choose_user_service())
 
-@app.route("/user/<path:subpath>", methods=["PUT","GET"])
-def gw_user_update(subpath):
-    return _forward(choose_user_service())
+@app.get("/user/{subpath:path}")
+@app.put("/user/{subpath:path}")
+async def user_proxy(subpath: str, request: Request):
+    return await forward_request(request, choose_user_service())
 
-@app.route("/order", methods=["POST","PUT","GET"])
-@app.route("/order/<path:subpath>", methods=["POST","PUT","GET"])
-@app.route("/orders", methods=["GET"])
-@app.route("/orders/<path:subpath>", methods=["GET"])
-def gw_order_proxy(subpath=None):
-    return _forward(ORDER_BASE)
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000)
+@app.get("/orders/{subpath:path}")
+@app.get("/order/{subpath:path}")
+@app.post("/order")
+@app.put("/order/{subpath:path}")
+async def order_proxy(subpath: str = "", request: Request = None):
+    return await forward_request(request, ORDER_BASE)

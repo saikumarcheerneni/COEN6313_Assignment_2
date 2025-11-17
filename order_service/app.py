@@ -1,38 +1,70 @@
-from flask import Flask, request, jsonify
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from pymongo import MongoClient
 import os
 
 MONGO_URI = os.environ.get("ORDER_MONGO_URI", "mongodb://mongo_order:27017/")
-
-app = Flask(__name__)
-mongo_client = MongoClient(MONGO_URI)
-db = mongo_client.orderdb
+client = MongoClient(MONGO_URI)
+db = client.orderdb
 orders = db.orders
 
-@app.route("/health", methods=["GET"])
+app = FastAPI(
+    title="Order Service",
+    description="Handles creation and management of orders.",
+    version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------- MODELS ----------------
+
+class Order(BaseModel):
+    order_id: str
+    user_id: str
+    items: list
+    status: str
+    email: str
+    address: str
+
+class OrderUpdate(BaseModel):
+    items: list | None = None
+    status: str | None = None
+    email: str | None = None
+    address: str | None = None
+
+# ---------------- ROUTES ----------------
+
+@app.get("/health")
 def health():
-    return jsonify({"status": "ok", "component": "order_service"}), 200
+    return {"status": "ok", "component": "order_service"}
 
-@app.route("/order", methods=["POST"])
-def create_order():
-    data = request.get_json(force=True)
-    required = {"order_id","user_id","items","status","email","address"}
-    missing = [k for k in required if k not in data]
-    if missing:
-        return jsonify({"error": "missing fields", "fields": missing}), 400
-    orders.update_one({"order_id": data["order_id"]}, {"$set": data}, upsert=True)
-    return jsonify({"message": "Order created/updated", "order": data}), 201
+@app.post("/order")
+def create_order(order: Order):
+    orders.update_one(
+        {"order_id": order.order_id},
+        {"$set": order.dict()},
+        upsert=True
+    )
+    return {"message": "Order created/updated", "order": order}
 
-@app.route("/orders/<status>", methods=["GET"])
-def get_orders(status):
+@app.get("/orders/{status}")
+def get_orders(status: str):
     result = list(orders.find({"status": status}, {"_id": 0}))
-    return jsonify(result), 200
+    return {"orders": result}
 
-@app.route("/order/<order_id>", methods=["PUT"])
-def update_order(order_id):
-    data = request.get_json(force=True)
-    orders.update_one({"order_id": order_id}, {"$set": data}, upsert=True)
-    return jsonify({"message": "Order updated"}), 200
+@app.put("/order/{order_id}")
+def update_order(order_id: str, update: OrderUpdate):
+    update_data = {k: v for k, v in update.dict().items() if v is not None}
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5002)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    orders.update_one({"order_id": order_id}, {"$set": update_data}, upsert=True)
+
+    return {"message": "Order updated", "updated_fields": update_data}
