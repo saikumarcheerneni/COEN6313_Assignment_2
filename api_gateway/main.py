@@ -38,30 +38,22 @@ ORDER_BASE = "http://order_service:5002"
 
 # --------------- UTILITY: FORWARD REQUEST -------------------
 
-async def forward_request(request: Request, base_url: str):
-    url = f"{base_url}{request.url.path}"
-    method = request.method
-
-    body = None
-    if method in ["POST", "PUT", "PATCH"]:
-        body = await request.json()
-
+sync def forward_request(request: Request, url: str):
     try:
-        forwarded = requests.request(
-            method=method,
-            url=url,
-            params=request.query_params,
-            json=body,
-            timeout=10
-        )
-        return Response(
-            content=forwarded.content,
-            status_code=forwarded.status_code,
-            media_type=forwarded.headers.get("content-type", "application/json")
-        )
+        body = await request.json()
+    except:
+        body = None
 
-    except Exception as e:
-        return {"error": "service_unreachable", "detail": str(e)}, 502
+    headers = dict(request.headers)
+    headers.pop("host", None)
+
+    response = httpx.request(
+        method=request.method,
+        url=url,
+        json=body,
+        headers=headers
+    )
+    return JSONResponse(status_code=response.status_code, content=response.json())
 
 # ---------------------- ROUTES ----------------------
 

@@ -3,3 +3,4 @@ uvicorn
 pydantic[email]
 email-validator
 pymongo
+pika
