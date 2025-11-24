@@ -4,3 +4,4 @@ pydantic[email]
 email-validator
 pymongo
 pika
+requests
