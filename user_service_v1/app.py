@@ -8,7 +8,7 @@ import requests
 MONGO_URI = os.environ.get("USER_MONGO_URI", "mongodb://mongo_user:27017/")
 client = MongoClient(MONGO_URI)
 db = client.userdb
-users = db.users
+users = db.users_v1
 
 app = FastAPI(
     title="User Service V1",

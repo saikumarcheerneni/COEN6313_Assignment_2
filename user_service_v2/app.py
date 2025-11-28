@@ -11,7 +11,7 @@ RABBITMQ_HOST = os.environ.get("RABBITMQ_HOST", "rabbitmq")
 
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client.userdb
-users = db.users
+users = db.users_v2
 
 app = FastAPI(
     title="User Service V2",
