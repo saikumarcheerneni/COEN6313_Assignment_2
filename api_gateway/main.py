@@ -2,13 +2,13 @@ import json
 import os
 import random
 import httpx
-from fastapi import FastAPI, Request, Body
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # -------------------------------------------------------
-# CONFIG
+# FASTAPI APP CONFIG
 # -------------------------------------------------------
 
 app = FastAPI(
@@ -17,6 +17,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Enable CORS for all
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,22 +25,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Config file for strangler pattern
 CONFIG_PATH = os.environ.get("GATEWAY_CONFIG", "config.json")
 
-
 def load_config():
-    """Load strangler P value from config.json."""
+    """Load routing probability (P) from config.json"""
     try:
         with open(CONFIG_PATH, "r") as f:
             return json.load(f)
-    except Exception:
+    except:
         return {"P": 0.5}
 
-
 def choose_user_service():
-    """Select user_v1 or user_v2 based on probability P."""
+    """Select User v1 or v2 based on strangler probability P."""
     cfg = load_config()
     P = float(cfg.get("P", 0.5))
+
     return "http://user_v1:5001" if random.random() < P else "http://user_v2:5003"
 
 
@@ -47,20 +48,24 @@ ORDER_BASE = "http://order_service:5002"
 
 
 # -------------------------------------------------------
-# REQUEST MODELS FOR SWAGGER UI
+# REQUEST MODELS FOR SWAGGER (IMPORTANT!)
 # -------------------------------------------------------
 
 class UserCreate(BaseModel):
+    user_id: str
+    name: str
     email: str
     address: str
 
 
 class UserUpdate(BaseModel):
+    name: str | None = None
     email: str | None = None
     address: str | None = None
 
 
 class OrderCreate(BaseModel):
+    user_id: str
     email: str
     address: str
     items: list[str]
@@ -71,21 +76,21 @@ class OrderStatusUpdate(BaseModel):
 
 
 # -------------------------------------------------------
-# HELPER FUNCTION TO FORWARD REQUEST
+# FORWARD HELPER FUNCTION
 # -------------------------------------------------------
 
 async def forward(method: str, url: str, body=None):
-    """Forward HTTP request to microservices."""
+    """Forward request to microservices and return response."""
     try:
         async with httpx.AsyncClient() as client:
             response = await client.request(method, url, json=body)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-    # Try JSON response, fallback to plain text
+    # Try JSON
     try:
         return JSONResponse(status_code=response.status_code, content=response.json())
-    except Exception:
+    except:
         return JSONResponse(status_code=response.status_code, content={"message": response.text})
 
 
@@ -104,21 +109,21 @@ def health():
 
 @app.post("/user")
 async def create_user(data: UserCreate):
-    """Create a user → forwarded to v1 or v2 based on P."""
+    """Create user → API gateway forwards to v1 or v2."""
     target = choose_user_service() + "/user"
     return await forward("POST", target, data.dict())
 
 
 @app.put("/user/{user_id}")
 async def update_user(user_id: str, data: UserUpdate):
-    """Update user → forwarded to v1 or v2."""
+    """Update user → forwarded to one version."""
     target = f"{choose_user_service()}/user/{user_id}"
     return await forward("PUT", target, data.dict())
 
 
 @app.get("/user/{user_id}")
 async def get_user(user_id: str):
-    """GET user → routed to one version."""
+    """Get user → forwarded to one version."""
     target = f"{choose_user_service()}/user/{user_id}"
     return await forward("GET", target)
 
