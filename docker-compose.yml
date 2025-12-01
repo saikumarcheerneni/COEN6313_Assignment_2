@@ -1,0 +1,86 @@
+services:
+
+  api_gateway:
+    build: ./api_gateway
+    container_name: api_gateway
+    environment:
+      - GATEWAY_CONFIG=/app/config.json
+    ports:
+      - "8000:8000"
+    depends_on:
+      - user_v1
+      - user_v2
+      - order_service
+      - mongo_user
+      - mongo_order
+      - rabbitmq
+
+  user_v1:
+    build: ./user_service_v1
+    container_name: user_v1
+    environment:
+      - USER_MONGO_URI=mongodb://mongo_user:27017/
+    ports:
+      - "5001:5001"
+    depends_on:
+      - mongo_user
+
+  user_v2:
+    build: ./user_service_v2
+    container_name: user_v2
+    environment:
+      - USER_MONGO_URI=mongodb://mongo_user:27017/
+      - RABBITMQ_HOST=rabbitmq
+    ports:
+      - "5003:5003"
+    depends_on:
+      - mongo_user
+      - rabbitmq
+
+  order_service:
+    build: ./order_service
+    container_name: order_service
+    environment:
+      - ORDER_MONGO_URI=mongodb://mongo_order:27017/
+    ports:
+      - "5002:5002"
+    depends_on:
+      - mongo_order
+
+  event_system:
+    build:
+      context: ./event_system
+      dockerfile: Dockerfile
+    container_name: event_consumer
+    ports:
+      - "8004:8004"
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - ORDER_MONGO_URI=mongodb://mongo_order:27017/
+    depends_on:
+      - rabbitmq
+      - mongo_order
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo_user:
+    image: mongo:7
+    container_name: mongo_user
+    ports:
+      - "27017:27017"
+
+  mongo_order:
+    image: mongo:7
+    container_name: mongo_order
+    ports:
+      - "27018:27017"
