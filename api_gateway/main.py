@@ -109,8 +109,6 @@ async def get_user(user_id: str):
     return await forward("GET", target)
 
 
-
-
 @app.post("/order")
 async def create_order(data: OrderCreate):
     """Create order."""
