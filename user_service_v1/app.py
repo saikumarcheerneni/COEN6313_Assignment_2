@@ -23,57 +23,48 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# -------------------- MODELS --------------------
 
 class User(BaseModel):
     user_id: str
     name: str
-    email: EmailStr   # ✔ email validation
-    address: str = Field(..., min_length=5)  # ✔ minimum address validation
+    email: EmailStr   
+    address: str = Field(..., min_length=5)  
 
 class UserUpdate(BaseModel):
     name: str | None = None
     email: EmailStr | None = None
     address: str | None = Field(None, min_length=5)
 
-# -------------------- ROUTES --------------------
 
 @app.get("/health")
 def health():
     return {"status": "ok", "component": "user_v1"}
 
 
-# -------------------- CREATE USER --------------------
 @app.post("/user")
 def create_user(user: User):
     users.update_one({"user_id": user.user_id}, {"$set": user.dict()}, upsert=True)
     return {"message": "User created/updated", "user": user}
 
 
-# -------------------- UPDATE USER + SYNC --------------------
 @app.put("/user/{user_id}")
 def update_user(user_id: str, update: UserUpdate):
 
-    # 1) Ensure user exists
     existing_user = users.find_one({"user_id": user_id})
     if not existing_user:
         raise HTTPException(status_code=404, detail="User does not exist")
 
-    # 2) Prepare update data
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No update fields provided")
 
-    # 3) Update user database
     users.update_one({"user_id": user_id}, {"$set": update_data})
 
-    # 4) SYNC with Order Service
     ORDER_SERVICE_URL = "http://order_service:5002/sync_user"
 
     try:
         requests.put(f"{ORDER_SERVICE_URL}/{user_id}", json=update_data)
     except:
-        # If order service is down, we still update user but warn
         return {
             "message": "User updated, but order service unreachable for synchronization",
             "updated_fields": update_data
@@ -84,8 +75,6 @@ def update_user(user_id: str, update: UserUpdate):
         "updated_fields": update_data
     }
 
-
-# -------------------- GET USER --------------------
 @app.get("/user/{user_id}")
 def get_user(user_id: str):
     user = users.find_one({"user_id": user_id}, {"_id": 0})

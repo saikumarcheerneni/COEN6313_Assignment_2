@@ -4,7 +4,6 @@ from pydantic import BaseModel, EmailStr, Field
 from pymongo import MongoClient
 import pika, json, os
 
-# ------------------ CONFIG ------------------
 
 MONGO_URI = os.environ.get("USER_MONGO_URI", "mongodb://mongo_user:27017/")
 RABBITMQ_HOST = os.environ.get("RABBITMQ_HOST", "rabbitmq")
@@ -26,7 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ------------------ MODELS ------------------
 
 class User(BaseModel):
     user_id: str
@@ -39,7 +37,6 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
     address: str | None = Field(None, min_length=5)
 
-# ------------------ RABBITMQ EVENT ------------------
 
 def publish_event(payload: dict):
     params = pika.ConnectionParameters(host=RABBITMQ_HOST)
@@ -56,39 +53,30 @@ def publish_event(payload: dict):
 
     connection.close()
 
-# ------------------ ROUTES ------------------
-
 @app.get("/health")
 def health():
     return {"status": "ok", "component": "user_v2"}
 
 @app.post("/user")
 def create_user(user: User):
-    # Upsert OK for creation
     users.update_one({"user_id": user.user_id}, {"$set": user.dict()}, upsert=True)
     return {"message": "User created/updated", "user": user}
 
 
 @app.put("/user/{user_id}")
 def update_user(user_id: str, update: UserUpdate):
-
-    # 1️⃣ Confirm user exists
     existing_user = users.find_one({"user_id": user_id})
     if not existing_user:
         raise HTTPException(status_code=404, detail="User does not exist")
 
-    # 2️⃣ Prepare update fields
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
 
-    # 3️⃣ Update user db
     users.update_one({"user_id": user_id}, {"$set": update_data})
 
-    # 4️⃣ Prepare event
     event_data = {f: update_data[f] for f in ["email", "address"] if f in update_data}
 
-    # 5️⃣ Publish event for syncing orders
     if event_data:
         payload = {"user_id": user_id, "update": event_data}
         try:

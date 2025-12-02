@@ -5,11 +5,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-
-# -------------------------------------------------------   
-# FASTAPI APP CONFIG
-# -------------------------------------------------------
+from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="API Gateway",
@@ -17,7 +13,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Enable CORS for all
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,7 +20,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Config file for strangler pattern
 CONFIG_PATH = os.environ.get("GATEWAY_CONFIG", "config.json")
 
 def load_config():
@@ -47,10 +41,6 @@ def choose_user_service():
 ORDER_BASE = "http://order_service:5002"
 
 
-# -------------------------------------------------------
-# REQUEST MODELS FOR SWAGGER (IMPORTANT!)
-# -------------------------------------------------------
-
 class UserCreate(BaseModel):
     user_id: str
     name: str
@@ -65,19 +55,18 @@ class UserUpdate(BaseModel):
 
 
 class OrderCreate(BaseModel):
+    order_id: str
     user_id: str
+    items: list
     email: str
     address: str
-    items: list[str]
+
 
 
 class OrderStatusUpdate(BaseModel):
     status: str
 
 
-# -------------------------------------------------------
-# FORWARD HELPER FUNCTION
-# -------------------------------------------------------
 
 async def forward(method: str, url: str, body=None):
     """Forward request to microservices and return response."""
@@ -87,25 +76,17 @@ async def forward(method: str, url: str, body=None):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-    # Try JSON
     try:
         return JSONResponse(status_code=response.status_code, content=response.json())
     except:
         return JSONResponse(status_code=response.status_code, content={"message": response.text})
 
 
-# -------------------------------------------------------
-# HEALTH CHECK
-# -------------------------------------------------------
-
 @app.get("/health")
 def health():
     return {"status": "ok", "component": "gateway"}
 
 
-# -------------------------------------------------------
-# USER ROUTES
-# -------------------------------------------------------
 
 @app.post("/user")
 async def create_user(data: UserCreate):
@@ -128,9 +109,7 @@ async def get_user(user_id: str):
     return await forward("GET", target)
 
 
-# -------------------------------------------------------
-# ORDER ROUTES
-# -------------------------------------------------------
+
 
 @app.post("/order")
 async def create_order(data: OrderCreate):
